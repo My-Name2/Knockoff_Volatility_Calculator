@@ -41,8 +41,8 @@ def get_current_price(ticker_obj):
 def pick_calendar_dates(expiration_strings):
     """
     1) Convert all expiration date strings to date objects and sort ascending.
-    2) near_date: pick the earliest date >= 30 days from now. 
-       If none >=30, pick the largest date <30. 
+    2) near_date: pick the earliest date < 30 days from now. 
+       If none <30, pick the largest date >=30. 
     3) far_date: pick the next date in the list after near_date.
     Returns (near_date_str, far_date_str).
     
@@ -56,9 +56,9 @@ def pick_calendar_dates(expiration_strings):
     if not dte_list:
         raise ValueError("No expirations in the future.")
     
-    # Try to find the earliest date >=30 days
+    # Try to find the earliest date <30 days
     near_date = None
-    candidates_ge_30 = [x for x in dte_list if x[1] >= 30]
+    candidates_ge_30 = [x for x in dte_list if x[1] < 30]
     if candidates_ge_30:
         # pick earliest among these
         near_date = candidates_ge_30[0][0]
