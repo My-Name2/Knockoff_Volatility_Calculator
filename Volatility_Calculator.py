@@ -299,7 +299,7 @@ def main():
     st.title("Call Calendar Screener (~30 days → next expiration)")
 
     st.subheader("Ticker Cleaning Utility")
-    st.write("Paste text containing tickers in quotes (e.g. `'AAPL', 'TSLA'`) and click **Clean Tickers**.")
+    st.write("Paste text containing tickers in quotes (e.g. 'AAPL', 'TSLA') and click **Clean Tickers**.")
     
     raw_tickers_text = st.text_area("Paste tickers with quotes here:", 
                                     value="'AMC', 'CART', 'CAVA', 'CPNG'")
