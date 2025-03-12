@@ -148,12 +148,16 @@ def compute_calendar_recommendation(ticker):
         if far_calls.empty:
             return f"Error: No calls found for far expiration {far_date_str}."
         
-        # Filter to the same strike
+        # Try to find an exact match for the near-chain ATM strike
         same_strike_df = far_calls[far_calls['strike'] == atm_strike]
         if same_strike_df.empty:
-            return f"Error: Far expiration {far_date_str} doesn't have strike {atm_strike}."
-        
-        far_call = same_strike_df.iloc[0]  # in case there's only one row
+            # If no exact match, find the closest strike available in the far chain
+            closest_idx = (far_calls['strike'] - atm_strike).abs().idxmin()
+            far_call = far_calls.loc[closest_idx]
+            # Update atm_strike to the found strike
+            atm_strike = far_call['strike']
+        else:
+            far_call = same_strike_df.iloc[0]
         
         # near leg data
         near_bid  = near_calls.loc[near_call_idx, 'bid']
@@ -168,7 +172,7 @@ def compute_calendar_recommendation(ticker):
         def mid(bid, ask):
             if pd.isna(bid) or pd.isna(ask):
                 return None
-            return (bid + ask)/2.0
+            return (bid + ask) / 2.0
         
         near_mid = mid(near_bid, near_ask)
         far_mid  = mid(far_bid,  far_ask)
@@ -178,12 +182,12 @@ def compute_calendar_recommendation(ticker):
         
         net_debit = far_mid - near_mid
         
-        # Additional checks: 
-        # - Average daily volume (equity), 
-        # - IV30>RV30, 
+        # Additional checks:
+        # - Average daily volume (equity),
+        # - IV30 > RV30,
         # - negative term-structure slope? (optional).
         
-        # Historical price data for 3 mo
+        # Historical price data for 3 months
         hist = stock.history(period="3mo")
         if len(hist) < 30:
             return "Error: Not enough historical data for IV/RV checks."
@@ -194,17 +198,12 @@ def compute_calendar_recommendation(ticker):
             return "Error: Not enough data to compute 30-day average volume."
         eq_30day_avg = avg_equity_vol.iloc[-1]
         
-        # Yang-Zhang realized vol
+        # Yang-Zhang realized volatility (30-day window)
         rv30 = compute_yang_zhang_volatility(hist, window=30)
-        if rv30 is None or rv30==0:
+        if rv30 is None or rv30 == 0:
             return "Error: RV30 not computable."
         
-        # A quick approach for IV30: 
-        # We'll gather implied vol for all calls at all expirations, do a small interpolation around 30 DTE
-        # (This is a simplified approach, you could refine it further.)
-        # Gather all expiration dates, build day->IV
-        # We'll pick the ATM call's IV from each chain (for simplicity).
-        
+        # Quick approach for IV30: gather ATM call IVs from each expiration and interpolate around 30 DTE.
         exps = sorted(datetime.strptime(d, "%Y-%m-%d").date() for d in stock.options)
         iv_map = {}
         today = datetime.today().date()
@@ -214,7 +213,7 @@ def compute_calendar_recommendation(ticker):
             calls = chain.calls
             if calls.empty:
                 continue
-            # ATM for that expiration
+            # Find ATM call for this expiration
             diffs = (calls['strike'] - underlying_price).abs()
             idx = diffs.idxmin()
             if pd.isna(idx):
@@ -228,17 +227,17 @@ def compute_calendar_recommendation(ticker):
         if not iv_map:
             return "Error: No valid ATM call IV data for building IV30."
         
-        # Build simple day->iv interpolation
+        # Build simple day-to-IV interpolation
         dtes = list(iv_map.keys())
         ivs  = [iv_map[d] for d in dtes]
         
-        # Sort them
+        # Sort by DTE
         sorted_pairs = sorted(zip(dtes, ivs), key=lambda x: x[0])
         dtes_sorted, ivs_sorted = zip(*sorted_pairs)
         dtes_arr = np.array(dtes_sorted)
         ivs_arr  = np.array(ivs_sorted)
         
-        # We'll do a simple linear interpolation
+        # Use linear interpolation
         from scipy.interpolate import interp1d
         spline = interp1d(dtes_arr, ivs_arr, kind='linear', fill_value="extrapolate")
         
@@ -251,18 +250,17 @@ def compute_calendar_recommendation(ticker):
         
         iv30 = iv_estimate(30)
         
-        # IV30>RV30 pass
-        iv30_rv30_pass = (iv30/rv30 >= 1.25)
+        # Check if IV30 is sufficiently higher than RV30
+        iv30_rv30_pass = (iv30 / rv30 >= 1.25)
         
         # Term structure slope: compare earliest DTE to 45 DTE
         first_dte = dtes_arr[0]
         if first_dte >= 45:
-            slope_pass = False  # or interpret slope as 0? your call.
+            slope_pass = False  # alternatively, interpret slope as 0
             slope_value = 0
         else:
             slope_value = (iv_estimate(45) - iv_estimate(first_dte)) / (45 - first_dte)
-            # e.g. pass if slope is negative enough
-            slope_pass = (slope_value <= -0.00406)
+            slope_pass = (slope_value <= -0.00406)  # pass if slope is negative enough
         
         # 1.5 million daily equity volume pass/fail
         avg_vol_pass = (eq_30day_avg >= 1_500_000)
@@ -284,7 +282,7 @@ def compute_calendar_recommendation(ticker):
             
             "net_debit": net_debit,
             
-            # pass/fail checks
+            # Pass/fail checks
             "avg_volume_pass": avg_vol_pass,
             "iv30_rv30_pass": iv30_rv30_pass,
             "ts_slope_0_45_pass": slope_pass,
@@ -293,6 +291,7 @@ def compute_calendar_recommendation(ticker):
 
     except Exception as ex:
         return f"Error for {ticker}: {str(ex)}"
+
 
 
 def main():
